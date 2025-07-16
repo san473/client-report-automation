@@ -1,0 +1,5 @@
+{
+  "name": "client-report",
+  "image": "mcr.microsoft.com/devcontainers/python:3.10-bullseye",
+  "postCreateCommand": "pip install -r requirements.txt && apt-get update && apt-get install -y wkhtmltopdf"
+}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; }
+    h2 { color: #2c3e50; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+    th, td { border: 1px solid #ddd; padding: 8px; font-size: 12px; }
+    th { background-color: #f0f0f0; }
+    .section-title { background-color: #eaeaea; padding: 6px; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <h2>Client Summary Report: {{ client_name }}</h2>
+
+  {% if risk %}
+    <div class="section-title">Performance & Risk Metrics</div>
+    <table>
+      {% for key, value in risk.items() %}
+        <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+
+  {% if summary %}
+    <div class="section-title">Account Summary (Consolidated View)</div>
+    <table>
+      {% for key, value in summary.items() %}
+        <tr><th>{{ key }}</th><td>{{ value }}</td></tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+
+</body>
+</html>
