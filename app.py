@@ -19,7 +19,7 @@ def load_excel(file_path):
 
 sheets = load_excel(FILE_PATH)
 
-# Utility functions to find key columns
+# Helpers to find columns
 def get_client_col(df):
     for col in df.columns:
         if "Client" in col or "Account" in col:
@@ -32,7 +32,7 @@ def get_asset_class_col(df):
             return col
     return None
 
-# Extract unique clients from relevant sheets
+# Extract only **clients** (exclude asset class categories)
 def extract_clients(sheets):
     relevant_sheets = ["Portfolio Risk Alerts", "Portfolio Position", "Exposure View", "Consolidated View (Super User)"]
     client_names = set()
@@ -43,9 +43,12 @@ def extract_clients(sheets):
         client_col = get_client_col(df)
         if client_col:
             client_names.update(df[client_col].dropna().unique())
-    return sorted(client_names)
+    # Remove known asset class names that might have leaked in (if any)
+    asset_class_names = extract_asset_classes(sheets)
+    filtered_clients = [c for c in client_names if c not in asset_class_names]
+    return sorted(filtered_clients)
 
-# Extract unique asset classes from Exposure View and Portfolio Position combined
+# Extract asset classes only (for asset class dropdown)
 def extract_asset_classes(sheets):
     asset_classes = set()
     for sheet_name in ["Exposure View", "Portfolio Position"]:
@@ -60,11 +63,14 @@ def extract_asset_classes(sheets):
 client_names = extract_clients(sheets)
 asset_classes = extract_asset_classes(sheets)
 
-# Dropdowns for Client and Asset Class
+# Dropdowns separated clearly
+st.subheader("Client-Specific Summary")
 selected_client = st.selectbox("Select Client for Summary Report", ["-- Select Client --"] + client_names)
+
+st.subheader("Asset Class Cross-Client View")
 selected_asset_class = st.selectbox("Select Asset Class for Cross-Client View", ["-- Select Asset Class --"] + asset_classes)
 
-# Mapping of display labels to exact Excel column names in Portfolio Risk Alerts
+# Mapping of display labels to exact Excel column names
 risk_col_map = {
     "Risk Tolerance": "Risk Tolerance",
     "1D Return": "Return_1D",
@@ -100,7 +106,7 @@ def generate_client_summary(client, sheets):
         st.warning("Portfolio Risk Alerts sheet is empty or missing.")
         return {}
 
-    risk_client_col = "Client Name"  # From your debug info
+    risk_client_col = "Client Name"
     filtered_risk = risk_df[risk_df[risk_client_col] == client]
 
     if filtered_risk.empty:
@@ -112,7 +118,7 @@ def generate_client_summary(client, sheets):
     for display_name, col_name in risk_col_map.items():
         report_data[display_name] = first_row.get(col_name, "-")
 
-    # Also include Asset Class Summary from Exposure View for this client
+    # Asset Class summary from Exposure View
     exposure_df = sheets.get("Exposure View", pd.DataFrame())
     if not exposure_df.empty:
         exposure_client_col = get_client_col(exposure_df)
@@ -136,7 +142,23 @@ def display_client_summary(report_data):
     # Show main summary except Asset Class Summary
     summary_keys = [k for k in report_data.keys() if k != "Asset Class Summary"]
     summary_df = pd.DataFrame([{k: report_data[k] for k in summary_keys}])
-    st.subheader("📄 Summary Report")
+
+    # Format percentage columns (returns, volatilities, drawdowns) — list columns you want as %
+    pct_columns = [  
+        "1D Return", "1W Return", "2W Return", "1M Return", "3M Return", "6M Return", "1Y Return", "2Y Return",
+        "Return since inception", "YTD Return",
+        "1W Volatility", "2W Volatility", "1M Volatility", "3M Volatility", "6M Volatility", "1Y Volatility", "2Y Volatility",
+        "Volatility since inception", "YTD Volatility",
+        "Current Drawdown", "Loan to Value"
+    ]
+
+    for col in pct_columns:
+        if col in summary_df.columns:
+            try:
+                summary_df[col] = pd.to_numeric(summary_df[col], errors='coerce').map(lambda x: f"{x:.2%}" if pd.notnull(x) else "-")
+            except Exception:
+                pass
+
     st.dataframe(summary_df.style.set_properties(**{
         'background-color': 'white',
         'color': 'black',
@@ -145,17 +167,20 @@ def display_client_summary(report_data):
         'border-width': '1px'
     }))
 
-    # Bar chart of numeric key metrics
+    # Plot numeric data as percentages
     plot_df = summary_df.melt(id_vars=[])
     plot_df["value"] = pd.to_numeric(plot_df["value"], errors='coerce')
     plot_df = plot_df.dropna(subset=["value"])
     if not plot_df.empty:
-        fig = px.bar(plot_df, x="variable", y="value", color="variable", title="Client Key Metrics", height=500)
+        # Convert decimal to percent for plotting
+        plot_df["value_pct"] = plot_df["value"] * 100
+        fig = px.bar(plot_df, x="variable", y="value_pct", color="variable", title="Client Key Metrics (%)", height=500)
+        fig.update_yaxes(title="Value (%)")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No numeric data available for chart.")
 
-    # Show asset class summary if exists
+    # Asset Class summary table
     if "Asset Class Summary" in report_data:
         st.subheader("📊 Asset Class Breakdown")
         st.dataframe(report_data["Asset Class Summary"])
@@ -197,11 +222,18 @@ def display_accounts_by_asset_class(sheets, asset_class):
     st.subheader(f"📋 Accounts with exposure in '{asset_class}'")
     st.dataframe(combined_summary)
 
-# Main app logic
+    # Plot the Market Value by Client/Account for this asset class
+    fig = px.bar(combined_summary, x="Client / Account", y="Market Value",
+                 title=f"Market Value by Client / Account for Asset Class '{asset_class}'", height=400)
+    st.plotly_chart(fig, use_container_width=True)
 
+# Display client summary if selected
 if selected_client and selected_client != "-- Select Client --":
     client_report = generate_client_summary(selected_client, sheets)
     display_client_summary(client_report)
 
+st.markdown("---")  # Separator
+
+# Display asset class view if selected
 if selected_asset_class and selected_asset_class != "-- Select Asset Class --":
     display_accounts_by_asset_class(sheets, selected_asset_class)
