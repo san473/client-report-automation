@@ -4,4 +4,7 @@ jinja2
 openpyxl
 pdfkit
 plotly
+matplotlib
 
+
+matplotlib
