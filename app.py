@@ -195,3 +195,68 @@ if selected_client and selected_client != "-- Select Client --":
 
 if selected_asset_class and selected_asset_class != "-- Select Asset Class --":
     display_accounts_by_asset_class(sheets, selected_asset_class)
+
+# Inside your app, after loading sheets and dropdown selection
+
+def generate_client_summary(client, sheets):
+    report_data = {}
+
+    risk_col_map = {
+        # Use exact column names from debug output here
+        "Risk Tolerance": "Risk Tolerance",
+        "1D Return": "1D Return",
+        "Target Return - ytd": "Target Return - YTD",
+        "Actual Return - inception": "Actual Return - Inception",
+        "Actual Volatility - inception": "Actual Volatility - Inception",
+        "Drawdown Limit": "Drawdown Limit",
+        "Actual Drawdown": "Actual Drawdown",
+        "Drawdown Limit Utilization": "Drawdown Limit Utilization",
+        "Loan to Value": "Loan to Value",
+        "Concentrated Holdings": "Concentrated Holdings",
+        "Net Asset Value": "Net Asset Value",
+        "No. Portfolio Level Alert": "Portfolio Level Alert Count",
+        "No. Instrument Level Alert": "Instrument Level Alert Count",
+        "Total Number of Alerts": "Total Alert Count"
+    }
+
+    risk_df = sheets.get("Portfolio Risk Alerts", pd.DataFrame())
+    risk_client_col = get_client_col(risk_df)
+    filtered_risk = risk_df[risk_df[risk_client_col] == client] if risk_client_col else pd.DataFrame()
+
+    if filtered_risk.empty:
+        st.warning(f"No Portfolio Risk Alerts data found for client {client}")
+        return {}
+
+    first_row = filtered_risk.iloc[0]
+
+    for key, col_name in risk_col_map.items():
+        report_data[key] = first_row.get(col_name, "-")
+
+    return report_data
+
+def display_client_summary(report_data):
+    if not report_data:
+        st.warning("No data available for selected client.")
+        return
+
+    summary_df = pd.DataFrame([report_data])
+    st.subheader("📄 Summary Report")
+    st.dataframe(summary_df)
+
+    # Plotting
+    plot_df = summary_df.melt(id_vars=["Account Name"])
+    plot_df["value"] = pd.to_numeric(plot_df["value"], errors='coerce')
+    plot_df = plot_df.dropna(subset=["value"])
+
+    if not plot_df.empty:
+        fig = px.bar(plot_df, x="variable", y="value", color="variable", title="Client Key Metrics", height=500)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No numeric data available for chart.")
+
+# Usage example:
+if selected_client and selected_client != "-- Select Client --":
+    st.write("DEBUG: Columns in Portfolio Risk Alerts")
+    risk_df = sheets.get("Portfolio Risk Alerts", pd.DataFrame())
+    st.write(list(risk_df.columns))
+    display_client_summary(generate_client_summary(selected_client, sheets))
