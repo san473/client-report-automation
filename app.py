@@ -19,6 +19,7 @@ def load_excel(file_path):
 
 sheets = load_excel(FILE_PATH)
 
+# Utility functions to find key columns
 def get_client_col(df):
     for col in df.columns:
         if "Client" in col or "Account" in col:
@@ -63,42 +64,57 @@ asset_classes = extract_asset_classes(sheets)
 selected_client = st.selectbox("Select Client for Summary Report", ["-- Select Client --"] + client_names)
 selected_asset_class = st.selectbox("Select Asset Class for Cross-Client View", ["-- Select Asset Class --"] + asset_classes)
 
-# Function to generate client summary report (same as before)
+# Mapping of display labels to exact Excel column names in Portfolio Risk Alerts
+risk_col_map = {
+    "Risk Tolerance": "Risk Tolerance",
+    "1D Return": "Return_1D",
+    "1W Return": "Return_1W",
+    "2W Return": "Return_2W",
+    "1M Return": "Return_1M",
+    "3M Return": "Return_3M",
+    "6M Return": "Return_6M",
+    "1Y Return": "Return_1Y",
+    "2Y Return": "Return_2Y",
+    "Return since inception": "Return_inception",
+    "YTD Return": "Return_ytd",
+    "1W Volatility": "Volatility_1W",
+    "2W Volatility": "Volatility_2W",
+    "1M Volatility": "Volatility_1M",
+    "3M Volatility": "Volatility_3M",
+    "6M Volatility": "Volatility_6M",
+    "1Y Volatility": "Volatility_1Y",
+    "2Y Volatility": "Volatility_2Y",
+    "Volatility since inception": "Volatility_inception",
+    "YTD Volatility": "Volatility_ytd",
+    "Current Drawdown": "Current Drawdown",
+    "Loan to Value": "Loan to Value",
+    "Number of Warnings": "Number of Warnings",
+    "Number of Breaches": "Number of Breaches"
+}
+
 def generate_client_summary(client, sheets):
     report_data = {}
 
-    risk_col_map = {
-        "Risk Tolerance": "Risk Tolerance",
-        "1D Return": "1D Return",
-        "Target Return - ytd": "Target Return - YTD",
-        "Actual Return - inception": "Actual Return - Inception",
-        "Actual Volatility - inception": "Actual Volatility - Inception",
-        "Drawdown Limit": "Drawdown Limit",
-        "Actual Drawdown": "Actual Drawdown",
-        "Drawdown Limit Utilization": "Drawdown Limit Utilization",
-        "Loan to Value": "Loan to Value",
-        "Concentrated Holdings": "Concentrated Holdings",
-        "Net Asset Value": "Net Asset Value",
-        "No. Portfolio Level Alert": "Portfolio Level Alert Count",
-        "No. Instrument Level Alert": "Instrument Level Alert Count",
-        "Total Number of Alerts": "Total Alert Count"
-    }
+    risk_df = sheets.get("Portfolio Risk Alerts", pd.DataFrame())
+    if risk_df.empty:
+        st.warning("Portfolio Risk Alerts sheet is empty or missing.")
+        return {}
 
-    try:
-        risk_df = sheets.get("Portfolio Risk Alerts", pd.DataFrame())
-        risk_client_col = get_client_col(risk_df)
-        filtered_risk = risk_df[risk_df[risk_client_col] == client] if risk_client_col else pd.DataFrame()
+    risk_client_col = "Client Name"  # From your debug info
+    filtered_risk = risk_df[risk_df[risk_client_col] == client]
 
-        if not filtered_risk.empty:
-            first_row = filtered_risk.iloc[0]
-            for key, col_name in risk_col_map.items():
-                report_data[key] = first_row.get(col_name, "-")
-    except Exception as e:
-        st.warning(f"Error extracting risk data: {e}")
+    if filtered_risk.empty:
+        st.warning(f"No Portfolio Risk Alerts data found for client '{client}'.")
+        return {}
+
+    first_row = filtered_risk.iloc[0]
+
+    for display_name, col_name in risk_col_map.items():
+        report_data[display_name] = first_row.get(col_name, "-")
 
     # Also include Asset Class Summary from Exposure View for this client
-    try:
-        exposure_df = sheets.get("Exposure View", pd.DataFrame())
+    exposure_df = sheets.get("Exposure View", pd.DataFrame())
+    if not exposure_df.empty:
         exposure_client_col = get_client_col(exposure_df)
         asset_class_col = get_asset_class_col(exposure_df)
         if exposure_client_col and asset_class_col:
@@ -109,8 +125,6 @@ def generate_client_summary(client, sheets):
                     "Quantity": "sum"
                 }).reset_index()
                 report_data["Asset Class Summary"] = asset_summary
-    except Exception as e:
-        st.warning(f"Error extracting exposure data: {e}")
 
     return report_data
 
@@ -132,22 +146,20 @@ def display_client_summary(report_data):
     }))
 
     # Bar chart of numeric key metrics
-    plot_df = summary_df.melt(id_vars=["Account Name"] if "Account Name" in summary_df.columns else [])
-    try:
-        plot_df["value"] = pd.to_numeric(plot_df["value"], errors='coerce')
-        plot_df = plot_df.dropna(subset=["value"])
-        if not plot_df.empty:
-            fig = px.bar(plot_df, x="variable", y="value", color="variable", title="Client Key Metrics", height=500)
-            st.plotly_chart(fig, use_container_width=True)
-    except Exception:
-        pass
+    plot_df = summary_df.melt(id_vars=[])
+    plot_df["value"] = pd.to_numeric(plot_df["value"], errors='coerce')
+    plot_df = plot_df.dropna(subset=["value"])
+    if not plot_df.empty:
+        fig = px.bar(plot_df, x="variable", y="value", color="variable", title="Client Key Metrics", height=500)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No numeric data available for chart.")
 
     # Show asset class summary if exists
     if "Asset Class Summary" in report_data:
         st.subheader("📊 Asset Class Breakdown")
         st.dataframe(report_data["Asset Class Summary"])
 
-# Function to display accounts grouped by asset class filter (cross-client)
 def display_accounts_by_asset_class(sheets, asset_class):
     if asset_class == "-- Select Asset Class --":
         st.info("Select an asset class to see account exposures.")
@@ -161,13 +173,11 @@ def display_accounts_by_asset_class(sheets, asset_class):
     position_client_col = get_client_col(position_df)
     position_asset_col = get_asset_class_col(position_df)
 
-    # Filter and combine Exposure View
     exposure_filtered = pd.DataFrame()
     if not exposure_df.empty and exposure_client_col and exposure_asset_col:
         exposure_filtered = exposure_df[exposure_df[exposure_asset_col] == asset_class][
             [exposure_client_col, exposure_asset_col, "Market Value", "Quantity"]].copy()
 
-    # Filter and combine Portfolio Position
     position_filtered = pd.DataFrame()
     if not position_df.empty and position_client_col and position_asset_col:
         position_filtered = position_df[position_df[position_asset_col] == asset_class][
@@ -179,7 +189,6 @@ def display_accounts_by_asset_class(sheets, asset_class):
         st.warning(f"No data found for asset class '{asset_class}'.")
         return
 
-    # Group by client/account and aggregate
     combined_summary = combined.groupby(combined.columns[0]).agg({
         "Market Value": "sum",
         "Quantity": "sum"
@@ -188,75 +197,11 @@ def display_accounts_by_asset_class(sheets, asset_class):
     st.subheader(f"📋 Accounts with exposure in '{asset_class}'")
     st.dataframe(combined_summary)
 
-# Show reports based on selections
+# Main app logic
+
 if selected_client and selected_client != "-- Select Client --":
     client_report = generate_client_summary(selected_client, sheets)
     display_client_summary(client_report)
 
 if selected_asset_class and selected_asset_class != "-- Select Asset Class --":
     display_accounts_by_asset_class(sheets, selected_asset_class)
-
-# Inside your app, after loading sheets and dropdown selection
-
-def generate_client_summary(client, sheets):
-    report_data = {}
-
-    risk_col_map = {
-        # Use exact column names from debug output here
-        "Risk Tolerance": "Risk Tolerance",
-        "1D Return": "1D Return",
-        "Target Return - ytd": "Target Return - YTD",
-        "Actual Return - inception": "Actual Return - Inception",
-        "Actual Volatility - inception": "Actual Volatility - Inception",
-        "Drawdown Limit": "Drawdown Limit",
-        "Actual Drawdown": "Actual Drawdown",
-        "Drawdown Limit Utilization": "Drawdown Limit Utilization",
-        "Loan to Value": "Loan to Value",
-        "Concentrated Holdings": "Concentrated Holdings",
-        "Net Asset Value": "Net Asset Value",
-        "No. Portfolio Level Alert": "Portfolio Level Alert Count",
-        "No. Instrument Level Alert": "Instrument Level Alert Count",
-        "Total Number of Alerts": "Total Alert Count"
-    }
-
-    risk_df = sheets.get("Portfolio Risk Alerts", pd.DataFrame())
-    risk_client_col = get_client_col(risk_df)
-    filtered_risk = risk_df[risk_df[risk_client_col] == client] if risk_client_col else pd.DataFrame()
-
-    if filtered_risk.empty:
-        st.warning(f"No Portfolio Risk Alerts data found for client {client}")
-        return {}
-
-    first_row = filtered_risk.iloc[0]
-
-    for key, col_name in risk_col_map.items():
-        report_data[key] = first_row.get(col_name, "-")
-
-    return report_data
-
-def display_client_summary(report_data):
-    if not report_data:
-        st.warning("No data available for selected client.")
-        return
-
-    summary_df = pd.DataFrame([report_data])
-    st.subheader("📄 Summary Report")
-    st.dataframe(summary_df)
-
-    # Plotting
-    plot_df = summary_df.melt(id_vars=["Account Name"])
-    plot_df["value"] = pd.to_numeric(plot_df["value"], errors='coerce')
-    plot_df = plot_df.dropna(subset=["value"])
-
-    if not plot_df.empty:
-        fig = px.bar(plot_df, x="variable", y="value", color="variable", title="Client Key Metrics", height=500)
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("No numeric data available for chart.")
-
-# Usage example:
-if selected_client and selected_client != "-- Select Client --":
-    st.write("DEBUG: Columns in Portfolio Risk Alerts")
-    risk_df = sheets.get("Portfolio Risk Alerts", pd.DataFrame())
-    st.write(list(risk_df.columns))
-    display_client_summary(generate_client_summary(selected_client, sheets))
