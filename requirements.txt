@@ -3,4 +3,5 @@ pandas
 jinja2
 openpyxl
 pdfkit
+plotly
 
